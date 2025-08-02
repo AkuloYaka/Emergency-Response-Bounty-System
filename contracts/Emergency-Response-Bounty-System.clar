@@ -7,6 +7,7 @@
 (define-constant ERR-ALREADY-RESPONDED (err u105))
 (define-constant ERR-INCIDENT-RESOLVED (err u106))
 (define-constant ERR-INVALID-ROLE (err u107))
+(define-constant ERR-NO-FIRST-RESPONSE (err u108))
 
 (define-data-var next-incident-id uint u1)
 (define-data-var next-response-id uint u1)
@@ -37,7 +38,8 @@
     status: (string-ascii 20),
     timestamp: uint,
     priority-votes: uint,
-    resolved-by: (optional principal)
+    resolved-by: (optional principal),
+    first-response-time: (optional uint)
   }
 )
 
@@ -61,6 +63,28 @@
 (define-map incident-votes
   { incident-id: uint, voter: principal }
   { voted: bool }
+)
+
+(define-map response-time-stats
+  { responder: principal }
+  {
+    total-response-time: uint,
+    fastest-response: uint,
+    average-response-time: uint,
+    time-bonus-earned: uint
+  }
+)
+
+(define-private (calculate-time-bonus (response-time uint) (severity uint))
+  (let
+    (
+      (base-bonus (if (<= response-time u10) u50 
+                   (if (<= response-time u20) u25
+                    (if (<= response-time u50) u10 u0))))
+      (severity-multiplier (+ u1 (/ severity u2)))
+    )
+    (* base-bonus severity-multiplier)
+  )
 )
 
 (define-public (register-responder (role (string-ascii 20)) (latitude int) (longitude int))
@@ -123,7 +147,8 @@
         status: "open",
         timestamp: stacks-block-height,
         priority-votes: u0,
-        resolved-by: none
+        resolved-by: none,
+        first-response-time: none
       }
     )
     (map-set user-balances
@@ -145,6 +170,13 @@
     )
     (asserts! (get verified responder-data) ERR-NOT-AUTHORIZED)
     (asserts! (is-eq (get status incident-data) "open") ERR-INCIDENT-RESOLVED)
+    (if (is-none (get first-response-time incident-data))
+      (map-set incidents
+        { incident-id: incident-id }
+        (merge incident-data { first-response-time: (some stacks-block-height) })
+      )
+      true
+    )
     (map-set responses
       { response-id: response-id }
       {
@@ -193,20 +225,35 @@
       (incident-data (unwrap! (map-get? incidents { incident-id: (get incident-id response-data) }) ERR-NOT-FOUND))
       (responder-balance (default-to u0 (get balance (map-get? user-balances { user: (get responder response-data) }))))
       (bounty-amount (get bounty-amount incident-data))
+      (response-time (- (get timestamp response-data) (get timestamp incident-data)))
+      (time-bonus (calculate-time-bonus response-time (get severity incident-data)))
+      (total-reward (+ bounty-amount time-bonus))
+      (responder-stats (default-to 
+        { total-response-time: u0, fastest-response: u999999, average-response-time: u0, time-bonus-earned: u0 }
+        (map-get? response-time-stats { responder: (get responder response-data) })))
     )
     (asserts! (is-eq tx-sender (get responder response-data)) ERR-NOT-AUTHORIZED)
     (asserts! (get verified response-data) ERR-NOT-AUTHORIZED)
     (asserts! (not (get reward-claimed response-data)) ERR-ALREADY-RESPONDED)
-    (asserts! (>= (var-get contract-balance) bounty-amount) ERR-INSUFFICIENT-BALANCE)
+    (asserts! (>= (var-get contract-balance) total-reward) ERR-INSUFFICIENT-BALANCE)
     (map-set responses
       { response-id: response-id }
       (merge response-data { reward-claimed: true })
     )
     (map-set user-balances
       { user: (get responder response-data) }
-      { balance: (+ responder-balance bounty-amount) }
+      { balance: (+ responder-balance total-reward) }
     )
-    (var-set contract-balance (- (var-get contract-balance) bounty-amount))
+    (map-set response-time-stats
+      { responder: (get responder response-data) }
+      {
+        total-response-time: (+ (get total-response-time responder-stats) response-time),
+        fastest-response: (if (< response-time (get fastest-response responder-stats)) response-time (get fastest-response responder-stats)),
+        average-response-time: (/ (+ (get total-response-time responder-stats) response-time) (+ (get total-responses (unwrap-panic (map-get? responders { responder: (get responder response-data) }))) u1)),
+        time-bonus-earned: (+ (get time-bonus-earned responder-stats) time-bonus)
+      }
+    )
+    (var-set contract-balance (- (var-get contract-balance) total-reward))
     (map-set incidents
       { incident-id: (get incident-id response-data) }
       (merge incident-data 
@@ -278,4 +325,43 @@
     total-token-supply: (var-get total-token-supply),
     contract-balance: (var-get contract-balance)
   }
+)
+
+(define-read-only (get-response-time-stats (responder principal))
+  (map-get? response-time-stats { responder: responder })
+)
+
+(define-read-only (get-incident-response-time (incident-id uint))
+  (let
+    (
+      (incident-data (map-get? incidents { incident-id: incident-id }))
+    )
+    (match incident-data
+      incident-info
+        (match (get first-response-time incident-info)
+          first-response (some (- first-response (get timestamp incident-info)))
+          none
+        )
+      none
+    )
+  )
+)
+
+(define-read-only (calculate-projected-reward (incident-id uint) (estimated-response-time uint))
+  (let
+    (
+      (incident-data (map-get? incidents { incident-id: incident-id }))
+    )
+    (match incident-data
+      incident-info
+        (let
+          (
+            (bounty-amount (get bounty-amount incident-info))
+            (time-bonus (calculate-time-bonus estimated-response-time (get severity incident-info)))
+          )
+          (some (+ bounty-amount time-bonus))
+        )
+      none
+    )
+  )
 )
