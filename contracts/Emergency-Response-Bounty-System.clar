@@ -8,6 +8,10 @@
 (define-constant ERR-INCIDENT-RESOLVED (err u106))
 (define-constant ERR-INVALID-ROLE (err u107))
 (define-constant ERR-NO-FIRST-RESPONSE (err u108))
+(define-constant ERR-ALREADY-ESCALATED (err u109))
+(define-constant ESCALATION-THRESHOLD-BLOCKS u50)
+(define-constant MAX-ESCALATION-LEVEL u3)
+(define-constant ESCALATION-MULTIPLIER u150)
 
 (define-data-var next-incident-id uint u1)
 (define-data-var next-response-id uint u1)
@@ -39,7 +43,10 @@
     timestamp: uint,
     priority-votes: uint,
     resolved-by: (optional principal),
-    first-response-time: (optional uint)
+    first-response-time: (optional uint),
+    escalation-level: uint,
+    last-escalation-block: uint,
+    original-bounty: uint
   }
 )
 
@@ -75,6 +82,16 @@
   }
 )
 
+(define-map escalation-history
+  { incident-id: uint, escalation-level: uint }
+  {
+    escalation-block: uint,
+    previous-bounty: uint,
+    new-bounty: uint,
+    escalated-by: principal
+  }
+)
+
 (define-private (calculate-time-bonus (response-time uint) (severity uint))
   (let
     (
@@ -84,6 +101,55 @@
       (severity-multiplier (+ u1 (/ severity u2)))
     )
     (* base-bonus severity-multiplier)
+  )
+)
+
+(define-private (calculate-escalated-bounty (original-bounty uint) (escalation-level uint))
+  (let
+    (
+      (multiplier (+ u100 (* escalation-level ESCALATION-MULTIPLIER)))
+    )
+    (/ (* original-bounty multiplier) u100)
+  )
+)
+
+(define-public (escalate-incident (incident-id uint))
+  (let
+    (
+      (incident-data (unwrap! (map-get? incidents { incident-id: incident-id }) ERR-NOT-FOUND))
+      (blocks-since-report (- stacks-block-height (get timestamp incident-data)))
+      (blocks-since-last-escalation (- stacks-block-height (get last-escalation-block incident-data)))
+      (current-level (get escalation-level incident-data))
+      (new-level (+ current-level u1))
+      (current-bounty (get bounty-amount incident-data))
+      (new-bounty (calculate-escalated-bounty (get original-bounty incident-data) new-level))
+    )
+    (asserts! (is-eq (get status incident-data) "open") ERR-INCIDENT-RESOLVED)
+    (asserts! (< current-level MAX-ESCALATION-LEVEL) ERR-ALREADY-ESCALATED)
+    (asserts! (if (is-eq current-level u0) 
+                 (>= blocks-since-report ESCALATION-THRESHOLD-BLOCKS)
+                 (>= blocks-since-last-escalation ESCALATION-THRESHOLD-BLOCKS)) ERR-NOT-AUTHORIZED)
+    (map-set incidents
+      { incident-id: incident-id }
+      (merge incident-data 
+        {
+          escalation-level: new-level,
+          last-escalation-block: stacks-block-height,
+          bounty-amount: new-bounty
+        }
+      )
+    )
+    (map-set escalation-history
+      { incident-id: incident-id, escalation-level: new-level }
+      {
+        escalation-block: stacks-block-height,
+        previous-bounty: current-bounty,
+        new-bounty: new-bounty,
+        escalated-by: tx-sender
+      }
+    )
+    (var-set contract-balance (+ (var-get contract-balance) (- new-bounty current-bounty)))
+    (ok new-level)
   )
 )
 
@@ -148,7 +214,10 @@
         timestamp: stacks-block-height,
         priority-votes: u0,
         resolved-by: none,
-        first-response-time: none
+        first-response-time: none,
+        escalation-level: u0,
+        last-escalation-block: u0,
+        original-bounty: bounty-amount
       }
     )
     (map-set user-balances
@@ -362,6 +431,56 @@
           (some (+ bounty-amount time-bonus))
         )
       none
+    )
+  )
+)
+
+(define-read-only (get-escalation-status (incident-id uint))
+  (let
+    (
+      (incident-data (map-get? incidents { incident-id: incident-id }))
+    )
+    (match incident-data
+      incident-info
+        (let
+          (
+            (current-level (get escalation-level incident-info))
+            (blocks-since-report (- stacks-block-height (get timestamp incident-info)))
+            (blocks-since-last-escalation (- stacks-block-height (get last-escalation-block incident-info)))
+            (can-escalate (and 
+              (is-eq (get status incident-info) "open")
+              (< current-level MAX-ESCALATION-LEVEL)
+              (if (is-eq current-level u0) 
+                 (>= blocks-since-report ESCALATION-THRESHOLD-BLOCKS)
+                 (>= blocks-since-last-escalation ESCALATION-THRESHOLD-BLOCKS))))
+          )
+          (some {
+            current-level: current-level,
+            can-escalate: can-escalate,
+            blocks-since-report: blocks-since-report,
+            blocks-since-last-escalation: blocks-since-last-escalation,
+            potential-bounty: (if can-escalate 
+              (calculate-escalated-bounty (get original-bounty incident-info) (+ current-level u1))
+              (get bounty-amount incident-info))
+          })
+        )
+      none
+    )
+  )
+)
+
+(define-read-only (get-escalation-history (incident-id uint) (escalation-level uint))
+  (map-get? escalation-history { incident-id: incident-id, escalation-level: escalation-level })
+)
+
+(define-read-only (can-escalate-incident (incident-id uint))
+  (let
+    (
+      (escalation-status (get-escalation-status incident-id))
+    )
+    (match escalation-status
+      status (get can-escalate status)
+      false
     )
   )
 )
