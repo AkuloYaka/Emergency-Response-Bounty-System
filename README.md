@@ -1,4 +1,4 @@
-# 🚨 Emergency Response Bounty System
+# Emergency Response Bounty System
 
 > Blockchain-powered emergency response coordination with crypto-based incentives 🚁💰
 
@@ -13,6 +13,7 @@ The Emergency Response Bounty System is a decentralized platform that enables fa
 - 👨‍🚒 **Role-based Registry** - Separate registration for fire, ambulance, and security personnel
 - 📜 **On-chain Audit Trail** - Complete response history stored on blockchain
 - 🗳️ **Community Prioritization** - DAO voting system for incident priority
+- 📍 **Dynamic Location Updates** - Responders can update their GPS coordinates in real-time
 
 ## 🚀 Quick Start
 
@@ -65,6 +66,13 @@ The Emergency Response Bounty System is a decentralized platform that enables fa
 (contract-call? .emergency-response-bounty-system claim-reward u1)
 ```
 
+5. **Update Location**
+```clarity
+(contract-call? .emergency-response-bounty-system update-responder-location
+  40748817   ; new latitude
+  -73985428) ; new longitude
+```
+
 ### For Contract Administrators
 
 1. **Verify Response**
@@ -92,6 +100,7 @@ The Emergency Response Bounty System is a decentralized platform that enables fa
 - `claim-reward` - Claim bounty tokens for verified response
 - `vote-incident-priority` - Vote to prioritize incident
 - `mint-tokens` - Create new tokens (admin only)
+- `update-responder-location` - Update responder GPS coordinates
 
 ## 🗺️ Data Structures
 

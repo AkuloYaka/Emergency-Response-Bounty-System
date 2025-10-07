@@ -176,6 +176,21 @@
     (ok true)
   )
 )
+(define-public (update-responder-location (new-latitude int) (new-longitude int))
+  (let
+    (
+      (responder-data (unwrap! (map-get? responders { responder: tx-sender }) ERR-NOT-FOUND))
+    )
+    (asserts! (get verified responder-data) ERR-NOT-AUTHORIZED)
+    (asserts! (and (>= new-latitude -90000000) (<= new-latitude 90000000)) ERR-INVALID-LOCATION)
+    (asserts! (and (>= new-longitude -180000000) (<= new-longitude 180000000)) ERR-INVALID-LOCATION)
+    (map-set responders
+      { responder: tx-sender }
+      (merge responder-data { latitude: new-latitude, longitude: new-longitude })
+    )
+    (ok true)
+  )
+)
 
 (define-public (verify-responder (responder principal))
   (let
