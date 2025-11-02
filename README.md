@@ -100,6 +100,7 @@ The Emergency Response Bounty System is a decentralized platform that enables fa
 - `claim-reward` - Claim bounty tokens for verified response
 - `vote-incident-priority` - Vote to prioritize incident
 - `mint-tokens` - Create new tokens (admin only)
+- `transfer-tokens` - Transfer tokens between users
 - `update-responder-location` - Update responder GPS coordinates
 
 ## 🗺️ Data Structures

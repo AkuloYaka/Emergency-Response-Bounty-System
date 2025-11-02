@@ -386,6 +386,27 @@
   )
 )
 
+(define-public (transfer-tokens (recipient principal) (amount uint))
+  (let
+    (
+      (sender-balance (default-to u0 (get balance (map-get? user-balances { user: tx-sender }))))
+      (recipient-balance (default-to u0 (get balance (map-get? user-balances { user: recipient }))))
+    )
+    (asserts! (> amount u0) ERR-INSUFFICIENT-BALANCE)
+    (asserts! (>= sender-balance amount) ERR-INSUFFICIENT-BALANCE)
+    (asserts! (not (is-eq tx-sender recipient)) ERR-NOT-AUTHORIZED)
+    (map-set user-balances
+      { user: tx-sender }
+      { balance: (- sender-balance amount) }
+    )
+    (map-set user-balances
+      { user: recipient }
+      { balance: (+ recipient-balance amount) }
+    )
+    (ok true)
+  )
+)
+
 (define-read-only (get-responder (responder principal))
   (map-get? responders { responder: responder })
 )
