@@ -163,3 +163,26 @@ This is an MVP implementation. Future enhancements could include:
 ## 📞 Emergency Note
 
 ⚠️ **This system is for demonstration purposes. In real emergencies, always call your local emergency services (911, 112, etc.) first!**
+
+## 🆕 Incident Cancellation Feature
+
+### Overview
+The Incident Cancellation feature allows incident reporters to cancel their reported incidents if no responses have been submitted yet, enabling them to recover their bounty funds. This enhances flexibility and prevents funds from being locked in unresolved incidents.
+
+### How It Works
+- Reporters can call the `cancel-incident` function with the incident ID
+- The system verifies the caller is the reporter, the incident is open, and no responses exist
+- Upon successful cancellation, the incident status is set to "cancelled", and the bounty is refunded
+
+### Usage Example
+```clarity
+(contract-call? .emergency-response-bounty-system cancel-incident u1)
+```
+
+### Benefits
+- Provides reporters with control over their incidents
+- Improves user experience by allowing retraction of false alarms
+- Ensures efficient fund management within the system
+
+### Updated Contract Functions
+- Added `cancel-incident` to the list of write functions for cancelling incidents

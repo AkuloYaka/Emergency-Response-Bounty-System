@@ -312,7 +312,7 @@
       (response-time (- (get timestamp response-data) (get timestamp incident-data)))
       (time-bonus (calculate-time-bonus response-time (get severity incident-data)))
       (total-reward (+ bounty-amount time-bonus))
-      (responder-stats (default-to 
+      (responder-stats (default-to
         { total-response-time: u0, fastest-response: u999999, average-response-time: u0, time-bonus-earned: u0 }
         (map-get? response-time-stats { responder: (get responder response-data) })))
     )
@@ -340,13 +340,38 @@
     (var-set contract-balance (- (var-get contract-balance) total-reward))
     (map-set incidents
       { incident-id: (get incident-id response-data) }
-      (merge incident-data 
-        { 
+      (merge incident-data
+        {
           status: "resolved",
           resolved-by: (some (get responder response-data))
         }
       )
     )
+    (ok true)
+  )
+)
+
+(define-public (cancel-incident (incident-id uint))
+  (let
+    (
+      (incident-data (unwrap! (map-get? incidents { incident-id: incident-id }) ERR-NOT-FOUND))
+      (reporter (get reporter incident-data))
+      (bounty-amount (get bounty-amount incident-data))
+      (reporter-balance (default-to u0 (get balance (map-get? user-balances { user: reporter }))))
+    )
+    (asserts! (is-eq tx-sender reporter) ERR-NOT-AUTHORIZED)
+    (asserts! (is-eq (get status incident-data) "open") ERR-INCIDENT-RESOLVED)
+    (asserts! (is-none (get first-response-time incident-data)) ERR-ALREADY-RESPONDED)
+    (asserts! (>= (var-get contract-balance) bounty-amount) ERR-INSUFFICIENT-BALANCE)
+    (map-set incidents
+      { incident-id: incident-id }
+      (merge incident-data { status: "cancelled" })
+    )
+    (map-set user-balances
+      { user: reporter }
+      { balance: (+ reporter-balance bounty-amount) }
+    )
+    (var-set contract-balance (- (var-get contract-balance) bounty-amount))
     (ok true)
   )
 )
